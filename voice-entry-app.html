@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoiceEntry</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d0d0d; --surface: #161616; --border: #262626;
+  --text: #f0f0f0; --muted: #737373; --accent: #22c55e;
+  --amber: #f59e0b; --red: #ef4444;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; justify-content: center; }
+.app { width: 100%; max-width: 480px; min-height: 100vh; display: flex; flex-direction: column; padding: 24px 16px 48px; }
+
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
+.client-name { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+
+.hint-area { text-align: center; margin-bottom: 36px; }
+.hint-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+.hint-text { font-size: 22px; font-weight: 500; color: var(--text); opacity: 0.5; transition: opacity 0.3s ease; }
+
+.input-area { display: flex; flex-direction: column; gap: 10px; }
+.input-row { display: flex; gap: 10px; align-items: flex-start; }
+textarea {
+  flex: 1; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; color: var(--text); font-size: 15px; font-family: inherit;
+  padding: 14px 16px; resize: none; outline: none; min-height: 72px; transition: border-color 0.2s;
+}
+textarea:focus { border-color: var(--accent); }
+textarea::placeholder { color: var(--muted); }
+
+.btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 20px; border-radius: 10px; border: none; font-size: 14px;
+  font-weight: 500; cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+  font-family: inherit;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--accent); color: #000; width: 100%; }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+.btn-danger { background: transparent; color: var(--red); border: 1px solid #3a1a1a; }
+.btn-submit { background: var(--accent); color: #000; }
+.btn-sm { padding: 8px 14px; font-size: 13px; border-radius: 8px; }
+.opt-group { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt-btn { background: var(--bg); border: 1px solid var(--border); border-radius: 20px; color: var(--muted); font-size: 12px; padding: 4px 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.opt-btn:hover { border-color: var(--accent); color: var(--text); }
+.opt-btn.selected { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+
+.btn-mic {
+  flex-shrink: 0; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+}
+.btn-mic.recording { background: var(--red); border-color: var(--red); animation: pulse 1.5s infinite; }
+.btn-mic:disabled { opacity: 0.3; cursor: not-allowed; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } }
+
+.status { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.status.warn { color: var(--amber); }
+.status.active { color: var(--accent); }
+
+.cards { display: flex; flex-direction: column; gap: 14px; margin-top: 4px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; transition: opacity 0.3s, border-color 0.3s; }
+.card.discarded { opacity: 0.25; pointer-events: none; }
+.card.done { border-color: var(--accent); }
+.card.error { border-color: var(--red); }
+.card.submitting { opacity: 0.6; }
+
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+.card-tab { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+.card-hint { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.card-badge { font-size: 18px; }
+
+.card-fields { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+.req { color: var(--amber); }
+.field-ctrl {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 14px; font-family: inherit; padding: 8px 10px;
+  outline: none; width: 100%; transition: border-color 0.15s;
+}
+.field-ctrl:focus { border-color: var(--accent); }
+.field-ctrl.missing { border-color: var(--amber); }
+select.field-ctrl { cursor: pointer; }
+.field-ctrl:disabled { opacity: 0.5; cursor: default; }
+
+.card-foot { display: flex; gap: 8px; padding: 10px 16px 14px; border-top: 1px solid var(--border); }
+.card-error { padding: 8px 16px 12px; font-size: 12px; color: var(--red); }
+
+.global-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 13px; font-weight: 600; padding: 10px 20px; border-radius: 20px; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; z-index: 100; }
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ================================================================
+//  CONFIG — edit this block for each client deployment
+// ================================================================
+const CONFIG = {
+  clientName: "plum",
+  endpoint: "https://script.google.com/macros/s/AKfycbzNT6knYB5wflfDL06CVsAahVFzOiW759TyGAAQ_w9kDTqeZupbY2GGJAfF1tMfU1dCnw/exec",
+
+  hints: [
+    "add project",
+    "add a task",
+    "see who is on leave"
+  ],
+
+  schema: [
+    {
+      tab: "Availability",
+      hint: "",
+      columns: [
+        { name: "Who", type: "select" },
+        { name: "Leave Type", type: "select" },
+        { name: "Start Date", type: "string" },
+        { name: "End Date", type: "string" },
+        { name: "Reason", type: "string" },
+        { name: "Days on Leave", type: "string" },
+        { name: "Cal_EventID", type: "string" },
+        { name: "_End_Date", type: "string" }
+      ]
+    },
+    {
+      tab: "Clients",
+      hint: "",
+      columns: [
+        { name: "Brand / Company", type: "string" },
+        { name: "Client Segment", type: "select", columnNumber: 2 },
+        { name: "PoC Name", type: "string" },
+        { name: "Plum PoC", type: "select", columnNumber: 4 }
+      ]
+    },
+    {
+      tab: "Rescheduler",
+      hint: "",
+      columns: [
+        { name: "What's changing", type: "select" },
+        { name: "Current End Date", type: "string" },
+        { name: "New Start Date", type: "string" },
+        { name: "Duration", type: "string" },
+        { name: "End Date", type: "string" },
+        { name: "Why", type: "string" },
+        { name: "Changed on", type: "string" },
+        { name: "Changed by", type: "string" },
+        { name: "Project Name", type: "string" }
+      ]
+    },
+    {
+      tab: "Stage Mapping",
+      hint: "",
+      columns: [
+        { name: "Project Stage", type: "select" },
+        { name: "Deliverables / Tasks", type: "select" },
+        { name: "Task Complexity", type: "string" },
+        { name: "Stage Sequence", type: "string" },
+        { name: "Stage Color Code", type: "string" },
+        { name: "Stage Color", type: "string" }
+      ]
+    },
+    {
+      tab: "Projects",
+      hint: "",
+      columns: [
+        { name: "Project Number", type: "string" },
+        { name: "Project Name", type: "string" },
+        { name: "Client", type: "select" },
+        { name: "Complexity", type: "string" },
+        { name: "Planned Deadline", type: "string" },
+        { name: "Status of Project", type: "string" },
+        { name: "% Completion", type: "string" },
+        { name: "Go to Scheduler", type: "string" },
+        { name: "Project Completion", type: "select" },
+        { name: "Proj Comp Timestamp", type: "string" },
+        { name: "People Involved", type: "select" },
+        { name: "Publish To Slack", type: "string" },
+        { name: "Last Sent On", type: "string" },
+        { name: "Last Sent By", type: "string" },
+        { name: "Latest Stage", type: "string" },
+        { name: "Start Date", type: "string" },
+        { name: "End Date", type: "string" },
+        { name: "No. of Changes", type: "string" },
+        { name: "Delay in Days", type: "string" },
+        { name: "Teams Involved", type: "string" },
+        { name: "No. of People Involved", type: "string" },
+        { name: "Project Leads", type: "string" },
+        { name: "Proj Number / Name / Client", type: "string" },
+        { name: "Duration of Project", type: "string" }
+      ]
+    },
+    {
+      tab: "Scheduler",
+      hint: "",
+      columns: [
+        { name: "Project", type: "select" },
+        { name: "Project Stage", type: "select" },
+        { name: "Deliverables / Tasks", type: "select" },
+        { name: "Who", type: "select" },
+        { name: "Role", type: "select" },
+        { name: "Start Date", type: "string" },
+        { name: "Duration", type: "string" },
+        { name: "End Date", type: "string" },
+        { name: "Days on Leave", type: "string" },
+        { name: "Status", type: "string" },
+        { name: "Done On", type: "string" },
+        { name: "Publish", type: "string" },
+        { name: "Scheduled on", type: "string" },
+        { name: "Scheduled by", type: "string" },
+        { name: "Published on", type: "string" },
+        { name: "Published By", type: "string" },
+        { name: "Scheduler Key", type: "string" },
+        { name: "Work ID", type: "string" },
+        { name: "Calendar Event ID", type: "string" },
+        { name: "Availability", type: "string" },
+        { name: "Overdue", type: "string" },
+        { name: "End_Date_Val", type: "string" },
+        { name: "Team", type: "string" },
+        { name: "HoverToolTip", type: "string" },
+        { name: "Client", type: "string" },
+        { name: "Overlap", type: "string" },
+        { name: "Capacity Util", type: "string" },
+        { name: "Project Status", type: "string" },
+        { name: "InActive", type: "string" },
+        { name: "Sent To Slack", type: "string" }
+      ]
+    },
+    {
+      tab: "Project Gantt",
+      hint: "",
+      columns: [
+        { name: "2026-04-06T18:30:00.000Z", type: "string" },
+        { name: "Delays in Days", type: "string" },
+        { name: "See With Stage", type: "string" },
+        { name: "Teams:", type: "string" },
+        { name: "Ppl:", type: "string" },
+        { name: "Stage:", type: "string" },
+        { name: "Client:", type: "string" },
+        { name: "Status:", type: "string" },
+        { name: "Ongoing, Delayed, Planned, Pipeline", type: "string" },
+        { name: "Deadline", type: "string" },
+        { name: "Holidays", type: "string" },
+        { name: "Leaves", type: "string" },
+        { name: "Additional deliverables", type: "string" },
+        { name: "Analysis & Writing", type: "string" },
+        { name: "Deliverables", type: "string" },
+        { name: "Fieldwork", type: "string" },
+        { name: "Kick off", type: "string" },
+        { name: "Project Planning", type: "string" },
+        { name: "Internal", type: "string" }
+      ]
+    },
+    {
+      tab: "People",
+      hint: "",
+      columns: [
+        { name: "Full Name", type: "string" },
+        { name: "Email ID", type: "string" },
+        { name: "Slack Member ID", type: "string" },
+        { name: "Designation", type: "string" },
+        { name: "Part of Teams", type: "string" },
+        { name: "Engagement Type", type: "string" },
+        { name: "Immediate Manager", type: "string" },
+        { name: "Competence Level", type: "string" },
+        { name: "InActive", type: "string" }
+      ]
+    },
+    {
+      tab: "Role Mapping",
+      hint: "",
+      columns: [
+        { name: "Who", type: "string" },
+        { name: "Role", type: "string" },
+        { name: "Team", type: "string" },
+        { name: "Responsibility", type: "string" },
+        { name: "Level", type: "string" }
+      ]
+    },
+    {
+      tab: "Holidays",
+      hint: "",
+      columns: [
+        { name: "Working Hours - Start Time", type: "string" },
+        { name: "1899-12-30T04:38:50.000Z", type: "string" }
+      ]
+    },
+    {
+      tab: "People Gantt",
+      hint: "",
+      columns: [
+        { name: "2026-04-06T18:30:00.000Z", type: "string" },
+        { name: "Workload", type: "string" },
+        { name: "Switch Views", type: "string" },
+        { name: "Teams:", type: "string" },
+        { name: "Proj:", type: "string" },
+        { name: "Stage:", type: "string" },
+        { name: "Client:", type: "string" },
+        { name: "Available", type: "string" },
+        { name: "Overbooked", type: "string" },
+        { name: "Occupied", type: "string" },
+        { name: "Leaves", type: "string" },
+        { name: "Holidays", type: "string" }
+      ]
+    },
+    {
+      tab: "Reports",
+      hint: "",
+      columns: [
+        { name: "Reports", type: "string" },
+        { name: "Link", type: "string" },
+        { name: "Planned vs Actual", type: "string" },
+        { name: "Utilization", type: "string" },
+        { name: "Overall Utilization Summary", type: "string" },
+        { name: "Project wise Utilization", type: "string" },
+        { name: "Utilization as per Calendar", type: "string" },
+        { name: "Overlaps", type: "string" },
+        { name: "Project & Task wise overlaps", type: "string" },
+        { name: "Multiple people on same Task", type: "string" },
+        { name: "Reschedules", type: "string" },
+        { name: "Leaves Summary", type: "string" },
+        { name: "Task Summary", type: "string" },
+        { name: "Who is doing what", type: "string" },
+        { name: "Project Allocations", type: "string" },
+        { name: "Project wise Manhours", type: "string" },
+        { name: "Task wise involvement", type: "string" }
+      ]
+    },
+    {
+      tab: "Sheet50",
+      hint: "",
+      columns: [
+        { name: "Planned days Breakup", type: "string" },
+        { name: "EXCLUDING HOLIDAYS AND WEEKENDS", type: "string" }
+      ]
+    },
+    {
+      tab: "Scoring Matrix",
+      hint: "",
+      columns: [
+        { name: "Rating Variables:", type: "string" },
+        { name: "Task", type: "string" },
+        { name: "Person", type: "string" },
+        { name: "Role", type: "string" },
+        { name: "Project", type: "string" },
+        { name: "Stage of Project", type: "string" }
+      ]
+    },
+    {
+      tab: "Status Updates Log",
+      hint: "",
+      columns: [
+        { name: "Timestamp", type: "string" },
+        { name: "ID", type: "string" },
+        { name: "Status", type: "string" },
+        { name: "Whodonnit", type: "string" }
+      ]
+    }
+  ]
+};
+// ================================================================
+
+// ── State ─────────────────────────────────────────────────────
+const S = {
+  screen: 'loading', // loading | idle | recording | transcribing | processing | preview
+  cards: [],         // { id, tab, row, status: pending|submitting|done|error|discarded, errMsg? }
+  resolvedOpts: {},  // "Tab::Col" → string[]
+  mediaRecorder: null,
+  audioChunks: [],
+  hintIdx: 0,
+  recognition: null,
+  hintTimer: null,
+  recTimer: null,
+  recSecs: 0
+};
+
+// ── Utilities ──────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const uid = () => Math.random().toString(36).slice(2, 9);
+const today = () => new Date().toISOString().split('T')[0];
+
+function toast(msg, ms = 2500) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), ms);
+}
+
+function getOpts(tabName, col) {
+  if (col.type !== 'select') return [];
+  return S.resolvedOpts[`${tabName}::${col.name}`] || [];
+}
+
+// Fetch unique values for real dropdown columns (non-converted tables only)
+async function loadDynamicOptions() {
+  if (!CONFIG.endpoint) return;
+  const tasks = [];
+  for (const tab of CONFIG.schema) {
+    tab.columns.forEach((col, idx) => {
+      if (col.type !== 'select') return;
+      const key = `${tab.tab}::${col.name}`;
+      const colNum = col.columnNumber || (idx + 1);
+      const url = `${CONFIG.endpoint}?action=uniqueValues&sheet=${encodeURIComponent(tab.tab)}&col=${colNum}`;
+      tasks.push(
+        fetch(url)
+          .then(r => r.json())
+          .then(opts => { if (Array.isArray(opts) && opts.length) S.resolvedOpts[key] = opts; })
+          .catch(() => {})
+      );
+    });
+  }
+  await Promise.all(tasks);
+}
+
+// ── Claude extraction ──────────────────────────────────────────
+function buildSchema() {
+  return CONFIG.schema.map(tab => {
+    const cols = tab.columns.map(col => {
+      let s = `  - ${col.name} (${col.type}${col.required ? ', REQUIRED' : ''})`;
+      const opts = getOpts(tab.tab, col);
+      if (opts.length) s += ` — options: [${opts.join(', ')}]`;
+      if (col.default === 'today') s += ` — default to today ${today()} if not stated`;
+      return s;
+    }).join('\n');
+    return `Tab: "${tab.tab}"\n${cols}`;
+  }).join('\n\n');
+}
+
+async function extractWithClaude(input) {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer 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"
+    },
+    body: JSON.stringify({
+      model: "openrouter/free",
+      messages: [{
+        role: "user",
+        content: `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
+
+${buildSchema()}
+
+Return ONLY a JSON array, even for a single entry:
+[{ "tab": "<tab name>", "row": { "<column>": <value> } }]
+
+Rules:
+- One message can yield entries across multiple tabs
+- date → YYYY-MM-DD, use today (${today()}) if not stated
+- select → match closest option exactly; null if uncertain
+- REQUIRED fields not mentioned → null (user will fill)
+- number → numeric only, no symbols
+- No markdown, no explanation. JSON array only.
+
+User: "${input}"`
+      }]
+    })
+  });
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || '';
+  return JSON.parse(text.replace(/```json|```/g, '').trim());
+}
+
+// ── Transcription ──────────────────────────────────────────────
+async function transcribe(blob) {
+  const arrayBuf = await blob.arrayBuffer();
+  const audioBuf = await new AudioContext().decodeAudioData(arrayBuf);
+  const wavBlob = encodeWAV(audioBuf);
+  const HF_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    setStatus(attempt === 0 ? 'Transcribing...' : `Model loading — retry ${attempt}/5...`, attempt === 0 ? 'active' : 'warn');
+    const res = await fetch(HF_URL, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wavBlob });
+    if (res.status === 503) {
+      const d = await res.json().catch(() => ({}));
+      await new Promise(r => setTimeout(r, Math.min((d.estimated_time || 20) * 1000, 30000)));
+      continue;
+    }
+    if (!res.ok) throw new Error(`HF error: ${res.status}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return (data.text || '').trim();
+  }
+  throw new Error('Model still loading — try again in a moment');
+}
+
+function encodeWAV(audioBuf) {
+  const ch = audioBuf.getChannelData(0);
+  const buf = new ArrayBuffer(44 + ch.length * 2);
+  const v = new DataView(buf);
+  const wr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  wr(0,'RIFF'); v.setUint32(4, 36 + ch.length * 2, true);
+  wr(8,'WAVE'); wr(12,'fmt '); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, audioBuf.sampleRate, true); v.setUint32(28, audioBuf.sampleRate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  wr(36,'data'); v.setUint32(40, ch.length * 2, true);
+  let o = 44;
+  for (let i = 0; i < ch.length; i++) { v.setInt16(o, Math.max(-1, Math.min(1, ch[i])) * 0x7FFF, true); o += 2; }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+// ── Recording ──────────────────────────────────────────────────
+async function startRecording() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!S.transcriptBase) S.transcriptBase = '';
+  if (!SR) { setStatus('Speech recognition not supported — type instead', 'warn'); return; }
+
+  S.recognition = new SR();
+  const recognition = S.recognition;
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-IN';
+
+  S.screen = 'recording'; render();
+
+  recognition.onresult = e => {
+    const transcript = [...e.results].map(r => r[0].transcript).join('');
+    S.transcript = transcript;
+    const ta = $('text-input');
+    if (ta) ta.value = (S.transcriptBase || '') + transcript;
+  };
+
+  recognition.onend = () => {
+    S.transcriptBase = (S.transcriptBase || '') + (S.transcript || '');
+    S.transcript = '';
+    S.screen = 'idle'; render();
+    const ta = $('text-input');
+    if (ta) ta.value = S.transcriptBase;
+  };
+
+  recognition.onerror = e => {
+    setStatus(`Mic error: ${e.error}`, 'warn'); S.screen = 'idle'; render();
+  };
+
+  recognition.start();
+  $('mic-btn').onclick = () => recognition.stop();
+}
+
+
+// ── Process input ──────────────────────────────────────────────
+async function processInput(input) {
+  if (!input.trim()) return;
+  S.screen = 'processing'; render();
+  setStatus('Extracting fields...', 'active');
+  try {
+    const entries = await extractWithClaude(input.trim());
+    if (!entries.length) throw new Error('No entries');
+    S.cards = entries.map(e => ({ id: uid(), tab: e.tab, row: e.row || {}, status: 'pending' }));
+    S.screen = 'preview'; render();
+  } catch {
+    setStatus('Could not extract — rephrase and try again.', 'warn');
+    S.screen = 'idle'; render();
+  }
+}
+
+// ── Sheet write ────────────────────────────────────────────────
+async function writeRow(tab, row) {
+  if (!CONFIG.endpoint) {
+    // Demo mode — simulate network delay
+    await new Promise(r => setTimeout(r, 700));
+    return;
+  }
+  // Note: Apps Script POST uses no-cors to avoid preflight issues.
+  // The write succeeds server-side; we can't read the response body.
+  await fetch(CONFIG.endpoint, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tab, row })
+  });
+}
+
+// ── Card actions ───────────────────────────────────────────────
+async function submitCard(id) {
+  const card = S.cards.find(c => c.id === id);
+  if (!card || card.status !== 'pending') return;
+  const tabDef = CONFIG.schema.find(t => t.tab === card.tab);
+  const missing = (tabDef?.columns || []).filter(c => c.required && (card.row[c.name] == null || card.row[c.name] === ''));
+  if (missing.length) { toast(`Fill required: ${missing.map(c => c.name).join(', ')}`); return; }
+  card.status = 'submitting'; render();
+  try {
+    await writeRow(card.tab, card.row);
+    card.status = 'done';
+  } catch (e) {
+    card.status = 'error';
+    card.errMsg = e.message || 'Write failed';
+  }
+  render();
+  checkAllDone();
+}
+
+async function submitAll() {
+  const pending = S.cards.filter(c => c.status === 'pending');
+  for (const card of pending) await submitCard(card.id);
+}
+
+function discardCard(id) {
+  const c = S.cards.find(c => c.id === id);
+  if (c) { c.status = 'discarded'; render(); checkAllDone(); }
+}
+
+function retryCard(id) {
+  const c = S.cards.find(c => c.id === id);
+  if (c) { c.status = 'pending'; render(); }
+}
+
+function checkAllDone() {
+  const active = S.cards.filter(c => !['done', 'discarded'].includes(c.status));
+  if (!active.length) {
+    const saved = S.cards.filter(c => c.status === 'done').length;
+    if (saved) { toast(`${saved} entr${saved > 1 ? 'ies' : 'y'} saved ✓`); }
+    setTimeout(resetToIdle, 1800);
+  }
+}
+
+function resetToIdle() {
+  clearInterval(S.hintTimer);
+  S.screen = 'idle'; S.cards = [];
+  S.transcriptBase = '';
+  S.transcript = '';
+  render();
+}
+
+// ── Hints ──────────────────────────────────────────────────────
+function startHints() {
+  clearInterval(S.hintTimer);
+  S.hintTimer = setInterval(() => {
+    S.hintIdx = (S.hintIdx + 1) % CONFIG.hints.length;
+    const el = $('hint-text');
+    if (!el) return;
+    el.style.opacity = 0;
+    setTimeout(() => { el.textContent = CONFIG.hints[S.hintIdx]; el.style.opacity = 1; }, 300);
+  }, 4000);
+}
+
+function setStatus(msg, cls = '') {
+  const el = $('status');
+  if (!el) return;
+  el.className = 'status' + (cls ? ' ' + cls : '');
+  el.innerHTML = (cls === 'active' ? '<span class="spinner"></span>' : '') + msg;
+}
+
+// ── Render ─────────────────────────────────────────────────────
+const MIC_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3M9 22h6"/></svg>`;
+const STOP_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>`;
+
+function renderIdle() {
+  const busy = ['transcribing','processing'].includes(S.screen);
+  const rec = S.screen === 'recording';
+
+  $('app').innerHTML = `
+    <div class="header">
+      <span class="client-name">${CONFIG.clientName}</span>
+    </div>
+    <div class="hint-area">
+      <div class="hint-label">You can say</div>
+      <div class="hint-text" id="hint-text">${CONFIG.hints[S.hintIdx]}</div>
+    </div>
+    <div class="input-area">
+      <div class="input-row">
+        <button class="btn-mic ${rec ? 'recording' : ''}" id="mic-btn" ${busy ? 'disabled' : ''}>
+          ${rec ? STOP_ICON : MIC_ICON}
+        </button>
+        <textarea id="text-input" placeholder="…or type your entry here" rows="2" ${busy ? 'disabled' : ''}></textarea>
+      </div>
+      <div id="status" class="status">
+        ${rec ? `<span style="color:var(--red)">● Recording <span id="rec-time">${S.recSecs}s</span> — tap to stop</span>` : ''}
+      </div>
+      ${!busy ? `<button class="btn btn-primary" id="go-btn"${rec?' style="opacity:0.5"':''}>Extract & Preview →</button>` : ''}
+    </div>`;
+
+  startHints();
+
+  $('mic-btn').onclick = () => {
+    if (rec) stopRecording();
+    else startRecording().catch(() => setStatus('Microphone access denied', 'warn'));
+  };
+  const goBtn = $('go-btn');
+  if (goBtn) goBtn.onclick = () => {
+    if (S.screen === 'recording' && S.recognition) S.recognition.stop();
+    const val = $('text-input')?.value.trim() || S.transcriptBase || S.transcript;
+    if (val) processInput(val);
+    else toast('Type something first');
+  };
+}
+
+function renderPreview() {
+  const pending = S.cards.filter(c => c.status === 'pending');
+
+  const cardsHTML = S.cards.map(card => {
+    const def = CONFIG.schema.find(t => t.tab === card.tab);
+    const badge = { pending: '', submitting: '<span class="spinner"></span>', done: '✓', error: '✕', discarded: '—' }[card.status] || '';
+    const locked = card.status !== 'pending';
+
+  const fields = (() => {
+    const cols = def?.columns || [];
+    const required = cols.filter(c => c.required || card.row[c.name] != null && card.row[c.name] !== '');
+    const optional = cols.filter(c => !c.required && (card.row[c.name] == null || card.row[c.name] === ''));
+
+  const renderField = col => {
+      const val = card.row[col.name];
+      const empty = val == null || val === '';
+      const missing = empty && col.required;
+      const opts = getOpts(card.tab, col);
+      const id = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
+      const cls = `field-ctrl${missing ? ' missing' : ''}`;
+      let ctrl;
+
+      if (col.type === 'select') {
+        const optionsHTML = opts.map(o =>
+          `<option value="${o}"${val===o?' selected':''}>${o}</option>`
+        ).join('');
+        const customVal = val && !opts.includes(val) ? val : '';
+        ctrl = `
+          <select id="${id}" class="${cls}" ${locked?'disabled':''}>
+            <option value="">— Select —</option>
+            ${optionsHTML}
+            <option value="__custom__">Other (type below)…</option>
+          </select>
+          <input type="text" id="${id}_txt" class="${cls}" value="${customVal}"
+            placeholder="Or type a custom value…" autocomplete="off"
+            style="margin-top:6px;${customVal?'':'display:none'}" ${locked?'disabled':''}>`;
+      } else if (col.type === 'date') {
+        ctrl = `<input type="date" id="${id}" class="${cls}" value="${val||''}"${locked?' disabled':''}>`;
+      } else if (col.type === 'number') {
+        ctrl = `<input type="number" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
+      } else {
+        ctrl = `<input type="text" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
+      }
+      return `<div class="field"><div class="field-label">${col.name}${col.required?` <span class="req">*</span>`:''}</div>${ctrl}</div>`;
+    };
+
+    const requiredHTML = required.map(renderField).join('');
+    const optionalHTML = optional.length ? `
+      <details style="margin-top:4px">
+        <summary style="font-size:11px;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px">
+          <span id="sum-icon-${card.id}">▸</span> ${optional.length} more field${optional.length>1?'s':''}
+        </summary>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+          ${optional.map(renderField).join('')}
+        </div>
+      </details>` : '';
+
+    return requiredHTML + optionalHTML;
+  })();
+
+    const foot = card.status === 'pending'
+      ? `<div class="card-foot">
+           <button class="btn btn-submit btn-sm" data-submit="${card.id}">Submit</button>
+           <button class="btn btn-danger btn-sm" data-discard="${card.id}">Discard</button>
+         </div>`
+      : card.status === 'error'
+      ? `<div class="card-error">${card.errMsg}</div>
+         <div class="card-foot"><button class="btn btn-secondary btn-sm" data-retry="${card.id}">Retry</button></div>`
+      : '';
+
+    return `
+      <div class="card ${card.status}" id="card_${card.id}">
+        <div class="card-head">
+          <div>
+            <div class="card-tab">${card.tab}</div>
+            ${def?.hint ? `<div class="card-hint">${def.hint}</div>` : ''}
+          </div>
+          <div class="card-badge">${badge}</div>
+        </div>
+        <div class="card-fields">${fields}</div>
+        ${foot}
+      </div>`;
+  }).join('');
+
+  $('app').innerHTML = `
+    <div class="header"><span class="client-name">${CONFIG.clientName}</span></div>
+    <div class="cards">${cardsHTML}</div>
+    <div class="global-actions">
+      ${pending.length > 1 ? `<button class="btn btn-primary" id="submit-all-btn">Submit all (${pending.length})</button>` : ''}
+      <button class="btn btn-ghost" id="new-btn">← New entry</button>
+    </div>`;
+
+  // Wire up field sync
+// Wire up field sync
+  S.cards.forEach(card => {
+    if (card.status !== 'pending') return;
+    const def = CONFIG.schema.find(t => t.tab === card.tab);
+    (def?.columns || []).forEach(col => {
+      const id = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
+      const el = $(id);
+      if (!el) return;
+
+      if (col.type === 'select') {
+        const sel = $(id);
+        const txt = $(`${id}_txt`);
+        if (sel) sel.onchange = () => {
+          if (sel.value === '__custom__') {
+            if (txt) { txt.style.display = ''; txt.focus(); }
+            card.row[col.name] = '';
+          } else {
+            card.row[col.name] = sel.value;
+            if (txt) { txt.style.display = 'none'; txt.value = ''; }
+          }
+        };
+        if (txt) txt.oninput = txt.onchange = () => {
+          card.row[col.name] = txt.value;
+        };
+      } else {
+        el.oninput = el.onchange = () => {
+          card.row[col.name] = col.type === 'number' ? (parseFloat(el.value) || null) : el.value;
+        };
+      }
+    });
+  });
+
+  $('app').querySelectorAll('[data-submit]').forEach(b => b.onclick = () => submitCard(b.dataset.submit));
+  $('app').querySelectorAll('[data-discard]').forEach(b => b.onclick = () => discardCard(b.dataset.discard));
+  $('app').querySelectorAll('[data-retry]').forEach(b => b.onclick = () => retryCard(b.dataset.retry));
+  const sa = $('submit-all-btn');
+  if (sa) sa.onclick = submitAll;
+  $('new-btn').onclick = resetToIdle;
+}
+
+function render() {
+  if (S.screen === 'loading') {
+    $('app').innerHTML = `<div style="display:flex;align-items:center;justify-content:center;flex:1;height:100vh"><span class="spinner" style="width:24px;height:24px;border-width:3px"></span></div>`;
+    return;
+  }
+  if (S.screen === 'preview') { renderPreview(); return; }
+  renderIdle();
+}
+
+// ── Init ───────────────────────────────────────────────────────
+async function init() {
+  document.title = CONFIG.clientName + ' · VoiceEntry';
+  render();
+  await loadDynamicOptions();
+  S.screen = 'idle';
+  render();
+}
+
+init();
+</script>
+</body>
+</html>
