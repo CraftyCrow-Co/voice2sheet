@@ -403,7 +403,24 @@ function getOpts(tabName, col) {
   return S.resolvedOpts[`${tabName}::${col.name}`] || [];
 }
 
-// Fetch unique values for real dropdown columns (non-converted tables only)
+// JSONP fetch — only way to read Apps Script GET responses cross-origin from browser
+function jsonpFetch(url, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const cb = '_cb_' + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    const timer = setTimeout(() => {
+      delete window[cb]; script.remove(); reject(new Error('timeout'));
+    }, timeoutMs);
+    window[cb] = data => {
+      clearTimeout(timer); delete window[cb]; script.remove(); resolve(data);
+    };
+    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cb;
+    script.onerror = () => { clearTimeout(timer); delete window[cb]; reject(new Error('load error')); };
+    document.head.appendChild(script);
+  });
+}
+
+// Fetch unique values for select columns via JSONP
 async function loadDynamicOptions() {
   if (!CONFIG.endpoint) return;
   const tasks = [];
@@ -414,8 +431,7 @@ async function loadDynamicOptions() {
       const colNum = col.columnNumber || (idx + 1);
       const url = `${CONFIG.endpoint}?action=uniqueValues&sheet=${encodeURIComponent(tab.tab)}&col=${colNum}`;
       tasks.push(
-        fetch(url)
-          .then(r => r.json())
+        jsonpFetch(url)
           .then(opts => { if (Array.isArray(opts) && opts.length) S.resolvedOpts[key] = opts; })
           .catch(() => {})
       );
@@ -425,6 +441,17 @@ async function loadDynamicOptions() {
 }
 
 // ── Claude extraction ──────────────────────────────────────────
+const DEFAULT_OR_KEY = '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';
+
+function getApiKey() {
+  let key = localStorage.getItem('or_key') || DEFAULT_OR_KEY;
+  if (!key) {
+    key = prompt('Enter your OpenRouter API key:');
+    if (key) localStorage.setItem('or_key', key.trim());
+  }
+  return key ? key.trim() : null;
+}
+
 function buildSchema() {
   return CONFIG.schema.map(tab => {
     const cols = tab.columns.map(col => {
@@ -439,7 +466,20 @@ function buildSchema() {
 }
 
 async function extractWithClaude(input) {
-  const prompt = `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
+  const key = getApiKey();
+  if (!key) throw new Error('No API key');
+
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + key
+    },
+    body: JSON.stringify({
+      model: 'openrouter/auto',
+      messages: [{
+        role: 'user',
+        content: `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
 
 ${buildSchema()}
 
@@ -454,21 +494,18 @@ Rules:
 - number → numeric only, no symbols
 - No markdown, no explanation. JSON array only.
 
-User: "${input}"`;
-
-  const res = await fetch(CONFIG.endpoint, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'extract', prompt })
+User: "${input}"`
+      }]
+    })
   });
 
-  // no-cors means opaque response — Apps Script writes result to a temp cell
-  // Instead use a GET with the prompt encoded
-  const url = `${CONFIG.endpoint}?action=extract&prompt=${encodeURIComponent(prompt)}`;
-  const r = await fetch(url);
-  const data = await r.json();
-  const text = typeof data === 'string' ? data : (data.result || '');
+  if (res.status === 401) {
+    localStorage.removeItem('or_key');
+    throw new Error('Invalid API key — you will be prompted again');
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content || '';
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
