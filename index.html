@@ -100,6 +100,17 @@ select.field-ctrl { cursor: pointer; }
 
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 13px; font-weight: 600; padding: 10px 20px; border-radius: 20px; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; z-index: 100; }
 .toast.show { opacity: 1; }
+
+/* Key setup screen */
+.key-screen { display: flex; flex-direction: column; justify-content: center; flex: 1; gap: 20px; padding: 20px 0; }
+.key-screen h2 { font-size: 18px; font-weight: 600; color: var(--text); }
+.key-screen p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.key-screen a { color: var(--accent); text-decoration: none; }
+.key-input-wrap { display: flex; flex-direction: column; gap: 8px; }
+.key-input { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; font-family: inherit; padding: 12px 14px; outline: none; width: 100%; }
+.key-input:focus { border-color: var(--accent); }
+.key-hint { font-size: 11px; color: var(--muted); }
+.key-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); background: #0a2a14; border: 1px solid #1a4a2a; border-radius: 20px; padding: 3px 10px; width: fit-content; }
 </style>
 </head>
 <body>
@@ -403,24 +414,16 @@ function getOpts(tabName, col) {
   return S.resolvedOpts[`${tabName}::${col.name}`] || [];
 }
 
-// JSONP fetch — only way to read Apps Script GET responses cross-origin from browser
-function jsonpFetch(url, timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
-    const cb = '_cb_' + Math.random().toString(36).slice(2);
-    const script = document.createElement('script');
-    const timer = setTimeout(() => {
-      delete window[cb]; script.remove(); reject(new Error('timeout'));
-    }, timeoutMs);
-    window[cb] = data => {
-      clearTimeout(timer); delete window[cb]; script.remove(); resolve(data);
-    };
-    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cb;
-    script.onerror = () => { clearTimeout(timer); delete window[cb]; reject(new Error('load error')); };
-    document.head.appendChild(script);
-  });
+// Fetch Apps Script data via CORS proxy (since Apps Script blocks direct cross-origin reads)
+async function gsFetch(url) {
+  // Use allorigins as CORS proxy — wraps any URL response
+  const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+  const r = await fetch(proxy);
+  const data = await r.json();
+  return JSON.parse(data.contents);
 }
 
-// Fetch unique values for select columns via JSONP
+// Fetch unique values for select columns
 async function loadDynamicOptions() {
   if (!CONFIG.endpoint) return;
   const tasks = [];
@@ -431,7 +434,7 @@ async function loadDynamicOptions() {
       const colNum = col.columnNumber || (idx + 1);
       const url = `${CONFIG.endpoint}?action=uniqueValues&sheet=${encodeURIComponent(tab.tab)}&col=${colNum}`;
       tasks.push(
-        jsonpFetch(url)
+        gsFetch(url)
           .then(opts => { if (Array.isArray(opts) && opts.length) S.resolvedOpts[key] = opts; })
           .catch(() => {})
       );
@@ -440,17 +443,10 @@ async function loadDynamicOptions() {
   await Promise.all(tasks);
 }
 
-// ── Claude extraction ──────────────────────────────────────────
-const DEFAULT_OR_KEY = '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';
-
-function getApiKey() {
-  let key = localStorage.getItem('or_key') || DEFAULT_OR_KEY;
-  if (!key) {
-    key = prompt('Enter your OpenRouter API key:');
-    if (key) localStorage.setItem('or_key', key.trim());
-  }
-  return key ? key.trim() : null;
-}
+// ── API Key management ─────────────────────────────────────────
+function getApiKey() { return localStorage.getItem('or_key') || null; }
+function saveApiKey(k) { localStorage.setItem('or_key', k.trim()); }
+function clearApiKey() { localStorage.removeItem('or_key'); S.screen = 'setup'; render(); }
 
 function buildSchema() {
   return CONFIG.schema.map(tab => {
@@ -500,8 +496,8 @@ User: "${input}"`
   });
 
   if (res.status === 401) {
-    localStorage.removeItem('or_key');
-    throw new Error('Invalid API key — you will be prompted again');
+    clearApiKey();
+    throw new Error('Invalid API key — please enter a valid key');
   }
 
   const data = await res.json();
@@ -699,6 +695,7 @@ function renderIdle() {
   $('app').innerHTML = `
     <div class="header">
       <span class="client-name">${CONFIG.clientName}</span>
+      <button onclick="clearApiKey()" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">⚙ key</button>
     </div>
     <div class="hint-area">
       <div class="hint-label">You can say</div>
@@ -865,11 +862,63 @@ function renderPreview() {
   $('new-btn').onclick = resetToIdle;
 }
 
+function renderSetup() {
+  $('app').innerHTML = `
+    <div class="key-screen">
+      <div>
+        <div class="client-name" style="margin-bottom:12px">${CONFIG.clientName}</div>
+        <h2>Set up your API key</h2>
+      </div>
+      <p>
+        This app uses <strong>OpenRouter</strong> to understand your voice entries.<br>
+        Your key is saved only on this device — never uploaded anywhere.
+      </p>
+      <div class="key-input-wrap">
+        <input class="key-input" id="key-input" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
+        <div class="key-hint">Get a free key at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a></div>
+      </div>
+      <button class="btn btn-primary" id="key-save-btn">Save & continue →</button>
+      <div id="key-status" style="font-size:12px;color:var(--red);min-height:16px;text-align:center"></div>
+    </div>`;
+
+  const input = $('key-input');
+  const saveBtn = $('key-save-btn');
+  const status = $('key-status');
+
+  saveBtn.onclick = async () => {
+    const val = input.value.trim();
+    if (!val || !val.startsWith('sk-or-')) {
+      status.textContent = 'Please enter a valid OpenRouter key (starts with sk-or-)';
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Verifying…';
+    // Quick test call
+    try {
+      const r = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + val }
+      });
+      if (r.status === 401) {
+        status.textContent = 'Key rejected — check it and try again';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save & continue →';
+        return;
+      }
+    } catch(e) { /* network issue, save anyway */ }
+    saveApiKey(val);
+    S.screen = 'idle';
+    render();
+  };
+
+  input.onkeydown = e => { if (e.key === 'Enter') saveBtn.click(); };
+}
+
 function render() {
   if (S.screen === 'loading') {
     $('app').innerHTML = `<div style="display:flex;align-items:center;justify-content:center;flex:1;height:100vh"><span class="spinner" style="width:24px;height:24px;border-width:3px"></span></div>`;
     return;
   }
+  if (S.screen === 'setup') { renderSetup(); return; }
   if (S.screen === 'preview') { renderPreview(); return; }
   renderIdle();
 }
@@ -877,13 +926,15 @@ function render() {
 // ── Init ───────────────────────────────────────────────────────
 async function init() {
   document.title = CONFIG.clientName + ' · VoiceEntry';
+  S.screen = 'loading';
   render();
   await loadDynamicOptions();
-  S.screen = 'idle';
+  // Show setup screen if no key saved yet
+  S.screen = getApiKey() ? 'idle' : 'setup';
   render();
 }
 
 init();
 </script>
 </body>
-</html>
+</html> 
