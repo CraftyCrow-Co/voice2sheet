@@ -439,17 +439,7 @@ function buildSchema() {
 }
 
 async function extractWithClaude(input) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer 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"
-    },
-    body: JSON.stringify({
-      model: "openrouter/free",
-      messages: [{
-        role: "user",
-        content: `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
+  const prompt = `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
 
 ${buildSchema()}
 
@@ -464,12 +454,21 @@ Rules:
 - number → numeric only, no symbols
 - No markdown, no explanation. JSON array only.
 
-User: "${input}"`
-      }]
-    })
+User: "${input}"`;
+
+  const res = await fetch(CONFIG.endpoint, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'extract', prompt })
   });
-  const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || '';
+
+  // no-cors means opaque response — Apps Script writes result to a temp cell
+  // Instead use a GET with the prompt encoded
+  const url = `${CONFIG.endpoint}?action=extract&prompt=${encodeURIComponent(prompt)}`;
+  const r = await fetch(url);
+  const data = await r.json();
+  const text = typeof data === 'string' ? data : (data.result || '');
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
