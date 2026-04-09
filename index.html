@@ -123,7 +123,7 @@ select.field-ctrl { cursor: pointer; }
 // ================================================================
 const CONFIG = {
   clientName: "plum",
-  endpoint: "https://script.google.com/macros/s/AKfycbwTH-fs2jP015LKWSQwgAbACljl6Nqr963LUUg_7PjDBiRNAWaePVClfhx0SMJ1btVmDg/exec",
+  endpoint: "https://script.google.com/macros/s/AKfycbzNT6knYB5wflfDL06CVsAahVFzOiW759TyGAAQ_w9kDTqeZupbY2GGJAfF1tMfU1dCnw/exec",
 
   hints: [
     "add project",
@@ -440,10 +440,6 @@ async function loadDynamicOptions() {
   await Promise.all(tasks);
 }
 
-// ── API Key management (no longer needed — key is in Apps Script) ──────────
-function getApiKey() { return true; } // key lives server-side now
-function saveApiKey(k) {}
-function clearApiKey() {}
 
 function buildSchema() {
   return CONFIG.schema.map(tab => {
@@ -458,7 +454,15 @@ function buildSchema() {
   }).join('\n\n');
 }
 
+// ── API Key management ─────────────────────────────────────────
+function getApiKey() { return localStorage.getItem('or_key') || null; }
+function saveApiKey(k) { localStorage.setItem('or_key', k.trim()); }
+function clearApiKey() { localStorage.removeItem('or_key'); S.screen = 'setup'; render(); }
+
 async function extractWithClaude(input) {
+  const key = getApiKey();
+  if (!key) { S.screen = 'setup'; render(); throw new Error('No API key'); }
+
   const prompt = `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
 
 ${buildSchema()}
@@ -476,12 +480,27 @@ Rules:
 
 User: "${input}"`;
 
-  // Call Apps Script which proxies to OpenRouter server-side (no CORS, key safe)
-  const url = `${CONFIG.endpoint}?action=extract&body=${encodeURIComponent(JSON.stringify({ messages: [{ role: 'user', content: prompt }] }))}`;
-  const res = await fetch(url);
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + key,
+      'HTTP-Referer': window.location.origin,
+      'X-Title': 'VoiceEntry'
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-flash-1.5',
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+
+  if (res.status === 401) {
+    clearApiKey();
+    throw new Error('Invalid API key');
+  }
+
   const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  const text = data.result || '[]';
+  const text = data.choices?.[0]?.message?.content || '';
   return JSON.parse(text.replace(/```json|```/g, '').trim());
 }
 
@@ -898,6 +917,7 @@ function render() {
     $('app').innerHTML = `<div style="display:flex;align-items:center;justify-content:center;flex:1;height:100vh"><span class="spinner" style="width:24px;height:24px;border-width:3px"></span></div>`;
     return;
   }
+  if (S.screen === 'setup') { renderSetup(); return; }
   if (S.screen === 'preview') { renderPreview(); return; }
   renderIdle();
 }
@@ -908,7 +928,7 @@ async function init() {
   S.screen = 'loading';
   render();
   await loadDynamicOptions();
-  S.screen = 'idle';
+  S.screen = getApiKey() ? 'idle' : 'setup';
   render();
 }
 
