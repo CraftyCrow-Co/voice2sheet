@@ -100,17 +100,6 @@ select.field-ctrl { cursor: pointer; }
 
 .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--accent); color: #000; font-size: 13px; font-weight: 600; padding: 10px 20px; border-radius: 20px; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; z-index: 100; }
 .toast.show { opacity: 1; }
-
-/* Key setup screen */
-.key-screen { display: flex; flex-direction: column; justify-content: center; flex: 1; gap: 20px; padding: 20px 0; }
-.key-screen h2 { font-size: 18px; font-weight: 600; color: var(--text); }
-.key-screen p { font-size: 13px; color: var(--muted); line-height: 1.6; }
-.key-screen a { color: var(--accent); text-decoration: none; }
-.key-input-wrap { display: flex; flex-direction: column; gap: 8px; }
-.key-input { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 14px; font-family: inherit; padding: 12px 14px; outline: none; width: 100%; }
-.key-input:focus { border-color: var(--accent); }
-.key-hint { font-size: 11px; color: var(--muted); }
-.key-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); background: #0a2a14; border: 1px solid #1a4a2a; border-radius: 20px; padding: 3px 10px; width: fit-content; }
 </style>
 </head>
 <body>
@@ -120,6 +109,7 @@ select.field-ctrl { cursor: pointer; }
 <script>
 // ================================================================
 //  CONFIG — edit this block for each client deployment
+//  ✅ No API keys here — OpenRouter key lives in Apps Script only
 // ================================================================
 const CONFIG = {
   clientName: "plum",
@@ -414,13 +404,7 @@ function getOpts(tabName, col) {
   return S.resolvedOpts[`${tabName}::${col.name}`] || [];
 }
 
-// All data fetched via Apps Script (same origin = no CORS)
-async function gsFetch(url) {
-  const r = await fetch(url);
-  return r.json();
-}
-
-// Fetch unique values for select columns
+// Fetch unique values for real dropdown columns (non-converted tables only)
 async function loadDynamicOptions() {
   if (!CONFIG.endpoint) return;
   const tasks = [];
@@ -431,7 +415,8 @@ async function loadDynamicOptions() {
       const colNum = col.columnNumber || (idx + 1);
       const url = `${CONFIG.endpoint}?action=uniqueValues&sheet=${encodeURIComponent(tab.tab)}&col=${colNum}`;
       tasks.push(
-        gsFetch(url)
+        fetch(url)
+          .then(r => r.json())
           .then(opts => { if (Array.isArray(opts) && opts.length) S.resolvedOpts[key] = opts; })
           .catch(() => {})
       );
@@ -440,7 +425,7 @@ async function loadDynamicOptions() {
   await Promise.all(tasks);
 }
 
-
+// ── Schema builder ─────────────────────────────────────────────
 function buildSchema() {
   return CONFIG.schema.map(tab => {
     const cols = tab.columns.map(col => {
@@ -454,62 +439,37 @@ function buildSchema() {
   }).join('\n\n');
 }
 
-// ── API Key management ─────────────────────────────────────────
-function getApiKey() { return localStorage.getItem('or_key') || null; }
-function saveApiKey(k) { localStorage.setItem('or_key', k.trim()); }
-function clearApiKey() { localStorage.removeItem('or_key'); S.screen = 'setup'; render(); }
-
+// ── Claude extraction (proxied through Apps Script — no key in browser) ──
 async function extractWithClaude(input) {
-  const key = getApiKey();
-  if (!key) { S.screen = 'setup'; render(); throw new Error('No API key'); }
+  if (!CONFIG.endpoint) throw new Error('No endpoint configured');
 
-  const prompt = `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
-
-${buildSchema()}
-
-Return ONLY a JSON array, even for a single entry:
-[{ "tab": "<tab name>", "row": { "<column>": <value> } }]
-
-Rules:
-- One message can yield entries across multiple tabs
-- date → YYYY-MM-DD, use today (${today()}) if not stated
-- select → match closest option exactly; null if uncertain
-- REQUIRED fields not mentioned → null (user will fill)
-- number → numeric only, no symbols
-- No markdown, no explanation. JSON array only.
-
-User: "${input}"`;
-
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  // Send as text/plain to avoid CORS preflight.
+  // Apps Script ignores Content-Type and reads postData.contents fine.
+  const res = await fetch(CONFIG.endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + key,
-      'HTTP-Referer': window.location.origin,
-      'X-Title': 'VoiceEntry'
-    },
+    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({
-      model: 'google/gemini-flash-1.5',
-      messages: [{ role: 'user', content: prompt }]
+      action: 'extract',
+      input:  input,
+      schema: buildSchema(),
+      today:  today()
     })
   });
 
-  if (res.status === 401) {
-    clearApiKey();
-    throw new Error('Invalid API key');
-  }
-
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
   const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || '';
-  return JSON.parse(text.replace(/```json|```/g, '').trim());
+  if (data.error) throw new Error(data.error);
+  if (!Array.isArray(data)) throw new Error('Unexpected response from server');
+  return data;
 }
 
-// ── Transcription ──────────────────────────────────────────────
+// ── Transcription (HuggingFace public endpoint — no key needed) ──
 async function transcribe(blob) {
   const arrayBuf = await blob.arrayBuffer();
   const audioBuf = await new AudioContext().decodeAudioData(arrayBuf);
-  const wavBlob = encodeWAV(audioBuf);
-  const HF_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
+  const wavBlob  = encodeWAV(audioBuf);
+  const HF_URL   = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
+
   for (let attempt = 0; attempt < 5; attempt++) {
     setStatus(attempt === 0 ? 'Transcribing...' : `Model loading — retry ${attempt}/5...`, attempt === 0 ? 'active' : 'warn');
     const res = await fetch(HF_URL, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wavBlob });
@@ -527,10 +487,10 @@ async function transcribe(blob) {
 }
 
 function encodeWAV(audioBuf) {
-  const ch = audioBuf.getChannelData(0);
+  const ch  = audioBuf.getChannelData(0);
   const buf = new ArrayBuffer(44 + ch.length * 2);
-  const v = new DataView(buf);
-  const wr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  const v   = new DataView(buf);
+  const wr  = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
   wr(0,'RIFF'); v.setUint32(4, 36 + ch.length * 2, true);
   wr(8,'WAVE'); wr(12,'fmt '); v.setUint32(16, 16, true);
   v.setUint16(20, 1, true); v.setUint16(22, 1, true);
@@ -550,9 +510,9 @@ async function startRecording() {
 
   S.recognition = new SR();
   const recognition = S.recognition;
-  recognition.continuous = true;
+  recognition.continuous     = true;
   recognition.interimResults = true;
-  recognition.lang = 'en-IN';
+  recognition.lang           = 'en-IN';
 
   S.screen = 'recording'; render();
 
@@ -579,7 +539,6 @@ async function startRecording() {
   $('mic-btn').onclick = () => recognition.stop();
 }
 
-
 // ── Process input ──────────────────────────────────────────────
 async function processInput(input) {
   if (!input.trim()) return;
@@ -588,7 +547,7 @@ async function processInput(input) {
   try {
     const entries = await extractWithClaude(input.trim());
     if (!entries.length) throw new Error('No entries');
-    S.cards = entries.map(e => ({ id: uid(), tab: e.tab, row: e.row || {}, status: 'pending' }));
+    S.cards  = entries.map(e => ({ id: uid(), tab: e.tab, row: e.row || {}, status: 'pending' }));
     S.screen = 'preview'; render();
   } catch {
     setStatus('Could not extract — rephrase and try again.', 'warn');
@@ -599,23 +558,20 @@ async function processInput(input) {
 // ── Sheet write ────────────────────────────────────────────────
 async function writeRow(tab, row) {
   if (!CONFIG.endpoint) {
-    // Demo mode — simulate network delay
-    await new Promise(r => setTimeout(r, 700));
+    await new Promise(r => setTimeout(r, 700)); // demo mode
     return;
   }
-  // Note: Apps Script POST uses no-cors to avoid preflight issues.
-  // The write succeeds server-side; we can't read the response body.
   await fetch(CONFIG.endpoint, {
-    method: 'POST',
-    mode: 'no-cors',
+    method:  'POST',
+    mode:    'no-cors',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tab, row })
+    body:    JSON.stringify({ tab, row })
   });
 }
 
 // ── Card actions ───────────────────────────────────────────────
 async function submitCard(id) {
-  const card = S.cards.find(c => c.id === id);
+  const card   = S.cards.find(c => c.id === id);
   if (!card || card.status !== 'pending') return;
   const tabDef = CONFIG.schema.find(t => t.tab === card.tab);
   const missing = (tabDef?.columns || []).filter(c => c.required && (card.row[c.name] == null || card.row[c.name] === ''));
@@ -669,7 +625,7 @@ function startHints() {
   clearInterval(S.hintTimer);
   S.hintTimer = setInterval(() => {
     S.hintIdx = (S.hintIdx + 1) % CONFIG.hints.length;
-    const el = $('hint-text');
+    const el  = $('hint-text');
     if (!el) return;
     el.style.opacity = 0;
     setTimeout(() => { el.textContent = CONFIG.hints[S.hintIdx]; el.style.opacity = 1; }, 300);
@@ -684,17 +640,16 @@ function setStatus(msg, cls = '') {
 }
 
 // ── Render ─────────────────────────────────────────────────────
-const MIC_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3M9 22h6"/></svg>`;
+const MIC_ICON  = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3M9 22h6"/></svg>`;
 const STOP_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="3"/></svg>`;
 
 function renderIdle() {
   const busy = ['transcribing','processing'].includes(S.screen);
-  const rec = S.screen === 'recording';
+  const rec  = S.screen === 'recording';
 
   $('app').innerHTML = `
     <div class="header">
       <span class="client-name">${CONFIG.clientName}</span>
-      <button onclick="clearApiKey()" style="background:none;border:none;color:var(--muted);font-size:11px;cursor:pointer;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">⚙ key</button>
     </div>
     <div class="hint-area">
       <div class="hint-label">You can say</div>
@@ -732,61 +687,61 @@ function renderPreview() {
   const pending = S.cards.filter(c => c.status === 'pending');
 
   const cardsHTML = S.cards.map(card => {
-    const def = CONFIG.schema.find(t => t.tab === card.tab);
-    const badge = { pending: '', submitting: '<span class="spinner"></span>', done: '✓', error: '✕', discarded: '—' }[card.status] || '';
+    const def    = CONFIG.schema.find(t => t.tab === card.tab);
+    const badge  = { pending: '', submitting: '<span class="spinner"></span>', done: '✓', error: '✕', discarded: '—' }[card.status] || '';
     const locked = card.status !== 'pending';
 
-  const fields = (() => {
-    const cols = def?.columns || [];
-    const required = cols.filter(c => c.required || card.row[c.name] != null && card.row[c.name] !== '');
-    const optional = cols.filter(c => !c.required && (card.row[c.name] == null || card.row[c.name] === ''));
+    const fields = (() => {
+      const cols     = def?.columns || [];
+      const required = cols.filter(c => c.required || card.row[c.name] != null && card.row[c.name] !== '');
+      const optional = cols.filter(c => !c.required && (card.row[c.name] == null || card.row[c.name] === ''));
 
-  const renderField = col => {
-      const val = card.row[col.name];
-      const empty = val == null || val === '';
-      const missing = empty && col.required;
-      const opts = getOpts(card.tab, col);
-      const id = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
-      const cls = `field-ctrl${missing ? ' missing' : ''}`;
-      let ctrl;
+      const renderField = col => {
+        const val     = card.row[col.name];
+        const empty   = val == null || val === '';
+        const missing = empty && col.required;
+        const opts    = getOpts(card.tab, col);
+        const id      = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
+        const cls     = `field-ctrl${missing ? ' missing' : ''}`;
+        let ctrl;
 
-      if (col.type === 'select') {
-        const optionsHTML = opts.map(o =>
-          `<option value="${o}"${val===o?' selected':''}>${o}</option>`
-        ).join('');
-        const customVal = val && !opts.includes(val) ? val : '';
-        ctrl = `
-          <select id="${id}" class="${cls}" ${locked?'disabled':''}>
-            <option value="">— Select —</option>
-            ${optionsHTML}
-            <option value="__custom__">Other (type below)…</option>
-          </select>
-          <input type="text" id="${id}_txt" class="${cls}" value="${customVal}"
-            placeholder="Or type a custom value…" autocomplete="off"
-            style="margin-top:6px;${customVal?'':'display:none'}" ${locked?'disabled':''}>`;
-      } else if (col.type === 'date') {
-        ctrl = `<input type="date" id="${id}" class="${cls}" value="${val||''}"${locked?' disabled':''}>`;
-      } else if (col.type === 'number') {
-        ctrl = `<input type="number" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
-      } else {
-        ctrl = `<input type="text" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
-      }
-      return `<div class="field"><div class="field-label">${col.name}${col.required?` <span class="req">*</span>`:''}</div>${ctrl}</div>`;
-    };
+        if (col.type === 'select') {
+          const optionsHTML = opts.map(o =>
+            `<option value="${o}"${val===o?' selected':''}>${o}</option>`
+          ).join('');
+          const customVal = val && !opts.includes(val) ? val : '';
+          ctrl = `
+            <select id="${id}" class="${cls}" ${locked?'disabled':''}>
+              <option value="">— Select —</option>
+              ${optionsHTML}
+              <option value="__custom__">Other (type below)…</option>
+            </select>
+            <input type="text" id="${id}_txt" class="${cls}" value="${customVal}"
+              placeholder="Or type a custom value…" autocomplete="off"
+              style="margin-top:6px;${customVal?'':'display:none'}" ${locked?'disabled':''}>`;
+        } else if (col.type === 'date') {
+          ctrl = `<input type="date" id="${id}" class="${cls}" value="${val||''}"${locked?' disabled':''}>`;
+        } else if (col.type === 'number') {
+          ctrl = `<input type="number" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
+        } else {
+          ctrl = `<input type="text" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
+        }
+        return `<div class="field"><div class="field-label">${col.name}${col.required?` <span class="req">*</span>`:''}</div>${ctrl}</div>`;
+      };
 
-    const requiredHTML = required.map(renderField).join('');
-    const optionalHTML = optional.length ? `
-      <details style="margin-top:4px">
-        <summary style="font-size:11px;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px">
-          <span id="sum-icon-${card.id}">▸</span> ${optional.length} more field${optional.length>1?'s':''}
-        </summary>
-        <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
-          ${optional.map(renderField).join('')}
-        </div>
-      </details>` : '';
+      const requiredHTML = required.map(renderField).join('');
+      const optionalHTML = optional.length ? `
+        <details style="margin-top:4px">
+          <summary style="font-size:11px;color:var(--muted);cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px">
+            <span id="sum-icon-${card.id}">▸</span> ${optional.length} more field${optional.length>1?'s':''}
+          </summary>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+            ${optional.map(renderField).join('')}
+          </div>
+        </details>` : '';
 
-    return requiredHTML + optionalHTML;
-  })();
+      return requiredHTML + optionalHTML;
+    })();
 
     const foot = card.status === 'pending'
       ? `<div class="card-foot">
@@ -821,7 +776,6 @@ function renderPreview() {
     </div>`;
 
   // Wire up field sync
-// Wire up field sync
   S.cards.forEach(card => {
     if (card.status !== 'pending') return;
     const def = CONFIG.schema.find(t => t.tab === card.tab);
@@ -853,63 +807,12 @@ function renderPreview() {
     });
   });
 
-  $('app').querySelectorAll('[data-submit]').forEach(b => b.onclick = () => submitCard(b.dataset.submit));
+  $('app').querySelectorAll('[data-submit]').forEach(b => b.onclick  = () => submitCard(b.dataset.submit));
   $('app').querySelectorAll('[data-discard]').forEach(b => b.onclick = () => discardCard(b.dataset.discard));
-  $('app').querySelectorAll('[data-retry]').forEach(b => b.onclick = () => retryCard(b.dataset.retry));
+  $('app').querySelectorAll('[data-retry]').forEach(b => b.onclick   = () => retryCard(b.dataset.retry));
   const sa = $('submit-all-btn');
   if (sa) sa.onclick = submitAll;
   $('new-btn').onclick = resetToIdle;
-}
-
-function renderSetup() {
-  $('app').innerHTML = `
-    <div class="key-screen">
-      <div>
-        <div class="client-name" style="margin-bottom:12px">${CONFIG.clientName}</div>
-        <h2>Set up your API key</h2>
-      </div>
-      <p>
-        This app uses <strong>OpenRouter</strong> to understand your voice entries.<br>
-        Your key is saved only on this device — never uploaded anywhere.
-      </p>
-      <div class="key-input-wrap">
-        <input class="key-input" id="key-input" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
-        <div class="key-hint">Get a free key at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a></div>
-      </div>
-      <button class="btn btn-primary" id="key-save-btn">Save & continue →</button>
-      <div id="key-status" style="font-size:12px;color:var(--red);min-height:16px;text-align:center"></div>
-    </div>`;
-
-  const input = $('key-input');
-  const saveBtn = $('key-save-btn');
-  const status = $('key-status');
-
-  saveBtn.onclick = async () => {
-    const val = input.value.trim();
-    if (!val || !val.startsWith('sk-or-')) {
-      status.textContent = 'Please enter a valid OpenRouter key (starts with sk-or-)';
-      return;
-    }
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Verifying…';
-    // Quick test call
-    try {
-      const r = await fetch('https://openrouter.ai/api/v1/models', {
-        headers: { 'Authorization': 'Bearer ' + val }
-      });
-      if (r.status === 401) {
-        status.textContent = 'Key rejected — check it and try again';
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save & continue →';
-        return;
-      }
-    } catch(e) { /* network issue, save anyway */ }
-    saveApiKey(val);
-    S.screen = 'idle';
-    render();
-  };
-
-  input.onkeydown = e => { if (e.key === 'Enter') saveBtn.click(); };
 }
 
 function render() {
@@ -917,7 +820,6 @@ function render() {
     $('app').innerHTML = `<div style="display:flex;align-items:center;justify-content:center;flex:1;height:100vh"><span class="spinner" style="width:24px;height:24px;border-width:3px"></span></div>`;
     return;
   }
-  if (S.screen === 'setup') { renderSetup(); return; }
   if (S.screen === 'preview') { renderPreview(); return; }
   renderIdle();
 }
@@ -925,10 +827,9 @@ function render() {
 // ── Init ───────────────────────────────────────────────────────
 async function init() {
   document.title = CONFIG.clientName + ' · VoiceEntry';
-  S.screen = 'loading';
   render();
   await loadDynamicOptions();
-  S.screen = getApiKey() ? 'idle' : 'setup';
+  S.screen = 'idle';
   render();
 }
 
