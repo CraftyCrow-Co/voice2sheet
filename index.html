@@ -112,16 +112,15 @@ select.field-ctrl { cursor: pointer; }
 // ================================================================
 const CONFIG = {
   clientName: "plum",
-  endpoint: "https://script.google.com/macros/s/AKfycbwYtHbzSuVtWgFcbNQnAK3l9ONgznk3aVDX1GOQ7bDwhhAN4lSdb2DAph1iyaE1NQ/exec",
+  endpoint: "https://script.google.com/macros/s/AKfycbzNT6knYB5wflfDL06CVsAahVFzOiW759TyGAAQ_w9kDTqeZupbY2GGJAfF1tMfU1dCnw/exec",
 
   hints: [
-    "add project xyz",
-    "add a new client abc",
-    "add a new project xyz for client abc"
+    "add project",
+    "add a task",
+    "see who is on leave"
   ],
 
   schema: [
-   
     {
       tab: "Clients",
       hint: "",
@@ -132,7 +131,6 @@ const CONFIG = {
         { name: "Plum PoC", type: "string" }
       ]
     },
-    
     {
       tab: "Stage Mapping",
       hint: "",
@@ -141,8 +139,7 @@ const CONFIG = {
         { name: "Deliverables / Tasks", type: "select" },
         { name: "Task Complexity", type: "string" },
         { name: "Stage Sequence", type: "string" },
-        { name: "Stage Color Code", type: "string" },
-        { name: "Stage Color", type: "string" }
+        { name: "Stage Color Code", type: "string" }
       ]
     },
     {
@@ -154,6 +151,7 @@ const CONFIG = {
         { name: "Client", type: "select" },
         { name: "Complexity", type: "string" },
         { name: "Planned Deadline", type: "string" },
+        { name: "People Involved", type: "select" },
         { name: "Publish To Slack", type: "string" }
       ]
     },
@@ -166,12 +164,11 @@ const CONFIG = {
         { name: "Deliverables / Tasks", type: "select" },
         { name: "Who", type: "select" },
         { name: "Role", type: "select" },
-        { name: "Start Date", type: "date" },
-        { name: "Duration", type: "number" },
+        { name: "Start Date", type: "string" },
+        { name: "Duration", type: "string" },
         { name: "Publish", type: "string" }
       ]
     },
-   
     {
       tab: "People",
       hint: "",
@@ -180,6 +177,7 @@ const CONFIG = {
         { name: "Email ID", type: "string" },
         { name: "Slack Member ID", type: "string" },
         { name: "Designation", type: "string" },
+        { name: "Part of Teams", type: "string" },
         { name: "Engagement Type", type: "string" },
         { name: "Immediate Manager", type: "string" },
         { name: "InActive", type: "string" }
@@ -195,8 +193,8 @@ const CONFIG = {
         { name: "Responsibility", type: "string" },
         { name: "Level", type: "string" }
       ]
-    }
-    ]
+    },
+  ]
 };
 // ================================================================
 
@@ -231,7 +229,8 @@ function buildSchema() {
       if (col.default === 'today') s += ` — default to today ${today()} if not stated`;
       return s;
     }).join('\n');
-    return `Tab: "${tab.tab}"\n${cols}`;
+    return `Tab: "${tab.tab}"
+${cols}`;
   }).join('\n\n');
 }
 
@@ -458,7 +457,7 @@ function renderIdle() {
         <textarea id="text-input" placeholder="…or type your entry here" rows="2" ${busy ? 'disabled' : ''}></textarea>
       </div>
       <div id="status" class="status">
-        ${rec ? `<span style="color:var(--red)">● Recording <span id="rec-time">${S.recSecs}s</span> — tap to stop</span>` : ''}
+        ${rec ? `<span style="color:var(--red)">● Recording — tap to stop</span>` : ''}
       </div>
       ${!busy ? `<button class="btn btn-primary" id="go-btn"${rec?' style="opacity:0.5"':''}>Extract & Preview →</button>` : ''}
     </div>`;
@@ -466,7 +465,7 @@ function renderIdle() {
   startHints();
 
   $('mic-btn').onclick = () => {
-    if (rec) stopRecording();
+    if (rec) S.recognition?.stop();
     else startRecording().catch(() => setStatus('Microphone access denied', 'warn'));
   };
   const goBtn = $('go-btn');
@@ -555,13 +554,15 @@ function renderPreview() {
     </div>`;
 
   // Wire up field sync
-// Wire up field sync — plain inputs only
+// Wire up field sync
   S.cards.forEach(card => {
     if (card.status !== 'pending') return;
     const def = CONFIG.schema.find(t => t.tab === card.tab);
     (def?.columns || []).forEach(col => {
-      const el = $(`f_${card.id}_${col.name.replace(/\W/g,'_')}`);
+      const id = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
+      const el = $(id);
       if (!el) return;
+
       el.oninput = el.onchange = () => {
         card.row[col.name] = col.type === 'number' ? (parseFloat(el.value) || null) : el.value;
       };
