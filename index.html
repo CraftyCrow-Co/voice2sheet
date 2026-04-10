@@ -112,7 +112,7 @@ select.field-ctrl { cursor: pointer; }
 // ================================================================
 const CONFIG = {
   clientName: "plum",
-  endpoint: "https://script.google.com/macros/s/AKfycbwTH-fs2jP015LKWSQwgAbACljl6Nqr963LUUg_7PjDBiRNAWaePVClfhx0SMJ1btVmDg/exec",
+  endpoint: "https://script.google.com/macros/s/AKfycbwYtHbzSuVtWgFcbNQnAK3l9ONgznk3aVDX1GOQ7bDwhhAN4lSdb2DAph1iyaE1NQ/exec",
 
   hints: [
     "add project",
@@ -126,8 +126,8 @@ const CONFIG = {
       columns: [
         { name: "Who", type: "select" },
         { name: "Leave Type", type: "select" },
-        { name: "Start Date", type: "string" },
-        { name: "End Date", type: "string" },
+        { name: "Start Date", type: "date" },
+        { name: "End Date", type: "date" },
         { name: "Reason", type: "string" },
         { name: "Days on Leave", type: "string" },
         { name: "Cal_EventID", type: "string" },
@@ -210,8 +210,8 @@ const CONFIG = {
         { name: "Deliverables / Tasks", type: "select" },
         { name: "Who", type: "select" },
         { name: "Role", type: "select" },
-        { name: "Start Date", type: "string" },
-        { name: "Duration", type: "string" },
+        { name: "Start Date", type: "date" },
+        { name: "Duration", type: "number" },
         { name: "End Date", type: "string" },
         { name: "Days on Leave", type: "string" },
         { name: "Status", type: "string" },
