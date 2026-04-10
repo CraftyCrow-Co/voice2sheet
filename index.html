@@ -112,11 +112,12 @@ select.field-ctrl { cursor: pointer; }
 // ================================================================
 const CONFIG = {
   clientName: "plum",
-  endpoint: "https://script.google.com/macros/s/AKfycbwTH-fs2jP015LKWSQwgAbACljl6Nqr963LUUg_7PjDBiRNAWaePVClfhx0SMJ1btVmDg/exec",
+  endpoint: "https://script.google.com/macros/s/AKfycbzNT6knYB5wflfDL06CVsAahVFzOiW759TyGAAQ_w9kDTqeZupbY2GGJAfF1tMfU1dCnw/exec",
 
   hints: [
-    "add a client, brand is ***** , segment is Global Icons",
-    "add project xyz for Swiggy, leads are Rahul and Natasha",
+    "add project",
+    "add a task",
+    "see who is on leave"
   ],
 
   schema: [
@@ -373,16 +374,13 @@ const CONFIG = {
 
 // ── State ─────────────────────────────────────────────────────
 const S = {
-  screen: 'loading', // loading | idle | recording | transcribing | processing | preview
-  cards: [],         // { id, tab, row, status: pending|submitting|done|error|discarded, errMsg? }
-  resolvedOpts: {},  // "Tab::Col" → string[]
-  mediaRecorder: null,
-  audioChunks: [],
+  screen: 'loading', // loading | idle | recording | processing | preview
+  cards: [],
   hintIdx: 0,
   recognition: null,
   hintTimer: null,
-  recTimer: null,
-  recSecs: 0
+  transcriptBase: '',
+  transcript: ''
 };
 
 // ── Utilities ──────────────────────────────────────────────────
@@ -397,39 +395,11 @@ function toast(msg, ms = 2500) {
   setTimeout(() => el.classList.remove('show'), ms);
 }
 
-function getOpts(tabName, col) {
-  if (col.type !== 'select') return [];
-  if (col.source) return S.resolvedOpts[`${tabName}::${col.name}`] || [];
-  return col.options || [];
-}
-
-// ── Dynamic dropdown loader ────────────────────────────────────
-async function loadDynamicOptions() {
-  if (!CONFIG.endpoint) return;
-  const tasks = [];
-  for (const tab of CONFIG.schema) {
-    for (const col of tab.columns) {
-      if (col.type === 'select' && col.source) {
-        const key = `${tab.tab}::${col.name}`;
-        tasks.push(
-          fetch(`${CONFIG.endpoint}?tab=${encodeURIComponent(col.source.tab)}&range=${encodeURIComponent(col.source.range)}`)
-            .then(r => r.json())
-            .then(opts => { S.resolvedOpts[key] = opts.filter(Boolean); })
-            .catch(() => { S.resolvedOpts[key] = []; })
-        );
-      }
-    }
-  }
-  await Promise.all(tasks);
-}
-
-// ── Claude extraction ──────────────────────────────────────────
+// ── Schema builder ─────────────────────────────────────────────
 function buildSchema() {
   return CONFIG.schema.map(tab => {
     const cols = tab.columns.map(col => {
       let s = `  - ${col.name} (${col.type}${col.required ? ', REQUIRED' : ''})`;
-      const opts = getOpts(tab.tab, col);
-      if (opts.length) s += ` — options: [${opts.join(', ')}]`;
       if (col.default === 'today') s += ` — default to today ${today()} if not stated`;
       return s;
     }).join('\n');
@@ -437,39 +407,24 @@ function buildSchema() {
   }).join('\n\n');
 }
 
+// ── Claude extraction — proxied via Apps Script, no key in browser ──
 async function extractWithClaude(input) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer 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"
-    },
+  if (!CONFIG.endpoint) throw new Error('No endpoint configured');
+  const res = await fetch(CONFIG.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({
-      model: "openrouter/free",
-      messages: [{
-        role: "user",
-        content: `You are a data entry assistant for a Google Sheet. Extract entries from the user's message.
-
-${buildSchema()}
-
-Return ONLY a JSON array, even for a single entry:
-[{ "tab": "<tab name>", "row": { "<column>": <value> } }]
-
-Rules:
-- One message can yield entries across multiple tabs
-- date → YYYY-MM-DD, use today (${today()}) if not stated
-- select → match closest option exactly; null if uncertain
-- REQUIRED fields not mentioned → null (user will fill)
-- number → numeric only, no symbols
-- No markdown, no explanation. JSON array only.
-
-User: "${input}"`
-      }]
+      action: 'extract',
+      input:  input,
+      schema: buildSchema(),
+      today:  today()
     })
   });
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
   const data = await res.json();
-  const text = data.choices?.[0]?.message?.content || '';
-  return JSON.parse(text.replace(/```json|```/g, '').trim());
+  if (data.error) throw new Error(data.error);
+  if (!Array.isArray(data)) throw new Error('Unexpected response from server');
+  return data;
 }
 
 // ── Transcription ──────────────────────────────────────────────
@@ -709,24 +664,16 @@ function renderPreview() {
     const optional = cols.filter(c => !c.required && (card.row[c.name] == null || card.row[c.name] === ''));
 
   const renderField = col => {
-      const val = card.row[col.name];
-      const empty = val == null || val === '';
-      const missing = empty && col.required;
-      const opts = getOpts(card.tab, col);
-      const id = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
-      const cls = `field-ctrl${missing ? ' missing' : ''}`;
+      const val     = card.row[col.name];
+      const missing = (val == null || val === '') && col.required;
+      const id      = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
+      const cls     = `field-ctrl${missing ? ' missing' : ''}`;
       let ctrl;
 
-      if (col.type === 'select') {
-        // This generates the actual HTML for the buttons
-        const optButtons = opts.map(o =>
-          `<button class="opt-btn${val===o?' selected':''}" data-id="${id}" data-val="${o}">${o}</button>`
-        ).join('');
-        ctrl = `<div class="opt-group" id="${id}">${optButtons}</div>`;
+      if (col.type === 'number') {
+        ctrl = `<input type="number" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
       } else if (col.type === 'date') {
         ctrl = `<input type="date" id="${id}" class="${cls}" value="${val||''}"${locked?' disabled':''}>`;
-      } else if (col.type === 'number') {
-        ctrl = `<input type="number" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
       } else {
         ctrl = `<input type="text" id="${id}" class="${cls}" value="${val||''}" placeholder="${missing?'Required':''}"${locked?' disabled':''}>`;
       }
@@ -780,30 +727,16 @@ function renderPreview() {
     </div>`;
 
   // Wire up field sync
-// Wire up field sync
+// Wire up field sync — plain inputs only
   S.cards.forEach(card => {
     if (card.status !== 'pending') return;
     const def = CONFIG.schema.find(t => t.tab === card.tab);
     (def?.columns || []).forEach(col => {
-      const id = `f_${card.id}_${col.name.replace(/\W/g,'_')}`;
-      const el = $(id);
+      const el = $(`f_${card.id}_${col.name.replace(/\W/g,'_')}`);
       if (!el) return;
-
-      if (col.type === 'select') {
-        // This makes the buttons clickable AFTER they are on the screen
-        el.querySelectorAll('.opt-btn').forEach(btn => {
-          btn.onclick = (e) => {
-            e.preventDefault(); 
-            card.row[col.name] = btn.getAttribute('data-val');
-            el.querySelectorAll('.opt-btn').forEach(b => b.classList.remove('selected'));
-            btn.classList.add('selected');
-          };
-        });
-      } else {
-        el.oninput = el.onchange = () => {
-          card.row[col.name] = col.type === 'number' ? (parseFloat(el.value) || null) : el.value;
-        };
-      }
+      el.oninput = el.onchange = () => {
+        card.row[col.name] = col.type === 'number' ? (parseFloat(el.value) || null) : el.value;
+      };
     });
   });
 
@@ -827,8 +760,6 @@ function render() {
 // ── Init ───────────────────────────────────────────────────────
 async function init() {
   document.title = CONFIG.clientName + ' · VoiceEntry';
-  render();
-  await loadDynamicOptions();
   S.screen = 'idle';
   render();
 }
