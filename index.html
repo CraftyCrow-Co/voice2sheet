@@ -120,20 +120,7 @@ const CONFIG = {
   ],
 
   schema: [
-    {
-      tab: "Availability",
-      hint: "",
-      columns: [
-        { name: "Who", type: "select" },
-        { name: "Leave Type", type: "select" },
-        { name: "Start Date", type: "date" },
-        { name: "End Date", type: "date" },
-        { name: "Reason", type: "string" },
-        { name: "Days on Leave", type: "string" },
-        { name: "Cal_EventID", type: "string" },
-        { name: "_End_Date", type: "string" }
-      ]
-    },
+   
     {
       tab: "Clients",
       hint: "",
@@ -144,21 +131,7 @@ const CONFIG = {
         { name: "Plum PoC", type: "string" }
       ]
     },
-    {
-      tab: "Rescheduler",
-      hint: "",
-      columns: [
-        { name: "What's changing", type: "select" },
-        { name: "Current End Date", type: "string" },
-        { name: "New Start Date", type: "string" },
-        { name: "Duration", type: "string" },
-        { name: "End Date", type: "string" },
-        { name: "Why", type: "string" },
-        { name: "Changed on", type: "string" },
-        { name: "Changed by", type: "string" },
-        { name: "Project Name", type: "string" }
-      ]
-    },
+    
     {
       tab: "Stage Mapping",
       hint: "",
@@ -180,25 +153,7 @@ const CONFIG = {
         { name: "Client", type: "select" },
         { name: "Complexity", type: "string" },
         { name: "Planned Deadline", type: "string" },
-        { name: "Status of Project", type: "string" },
-        { name: "% Completion", type: "string" },
-        { name: "Go to Scheduler", type: "string" },
-        { name: "Project Completion", type: "select" },
-        { name: "Proj Comp Timestamp", type: "string" },
-        { name: "People Involved", type: "select" },
         { name: "Publish To Slack", type: "string" },
-        { name: "Last Sent On", type: "string" },
-        { name: "Last Sent By", type: "string" },
-        { name: "Latest Stage", type: "string" },
-        { name: "Start Date", type: "string" },
-        { name: "End Date", type: "string" },
-        { name: "No. of Changes", type: "string" },
-        { name: "Delay in Days", type: "string" },
-        { name: "Teams Involved", type: "string" },
-        { name: "No. of People Involved", type: "string" },
-        { name: "Project Leads", type: "string" },
-        { name: "Proj Number / Name / Client", type: "string" },
-        { name: "Duration of Project", type: "string" }
       ]
     },
     {
@@ -212,56 +167,10 @@ const CONFIG = {
         { name: "Role", type: "select" },
         { name: "Start Date", type: "date" },
         { name: "Duration", type: "number" },
-        { name: "End Date", type: "string" },
-        { name: "Days on Leave", type: "string" },
-        { name: "Status", type: "string" },
-        { name: "Done On", type: "string" },
         { name: "Publish", type: "string" },
-        { name: "Scheduled on", type: "string" },
-        { name: "Scheduled by", type: "string" },
-        { name: "Published on", type: "string" },
-        { name: "Published By", type: "string" },
-        { name: "Scheduler Key", type: "string" },
-        { name: "Work ID", type: "string" },
-        { name: "Calendar Event ID", type: "string" },
-        { name: "Availability", type: "string" },
-        { name: "Overdue", type: "string" },
-        { name: "End_Date_Val", type: "string" },
-        { name: "Team", type: "string" },
-        { name: "HoverToolTip", type: "string" },
-        { name: "Client", type: "string" },
-        { name: "Overlap", type: "string" },
-        { name: "Capacity Util", type: "string" },
-        { name: "Project Status", type: "string" },
-        { name: "InActive", type: "string" },
-        { name: "Sent To Slack", type: "string" }
       ]
     },
-    {
-      tab: "Project Gantt",
-      hint: "",
-      columns: [
-        { name: "2026-04-06T18:30:00.000Z", type: "string" },
-        { name: "Delays in Days", type: "string" },
-        { name: "See With Stage", type: "string" },
-        { name: "Teams:", type: "string" },
-        { name: "Ppl:", type: "string" },
-        { name: "Stage:", type: "string" },
-        { name: "Client:", type: "string" },
-        { name: "Status:", type: "string" },
-        { name: "Ongoing, Delayed, Planned, Pipeline", type: "string" },
-        { name: "Deadline", type: "string" },
-        { name: "Holidays", type: "string" },
-        { name: "Leaves", type: "string" },
-        { name: "Additional deliverables", type: "string" },
-        { name: "Analysis & Writing", type: "string" },
-        { name: "Deliverables", type: "string" },
-        { name: "Fieldwork", type: "string" },
-        { name: "Kick off", type: "string" },
-        { name: "Project Planning", type: "string" },
-        { name: "Internal", type: "string" }
-      ]
-    },
+   
     {
       tab: "People",
       hint: "",
@@ -270,10 +179,8 @@ const CONFIG = {
         { name: "Email ID", type: "string" },
         { name: "Slack Member ID", type: "string" },
         { name: "Designation", type: "string" },
-        { name: "Part of Teams", type: "string" },
         { name: "Engagement Type", type: "string" },
         { name: "Immediate Manager", type: "string" },
-        { name: "Competence Level", type: "string" },
         { name: "InActive", type: "string" }
       ]
     },
@@ -287,88 +194,7 @@ const CONFIG = {
         { name: "Responsibility", type: "string" },
         { name: "Level", type: "string" }
       ]
-    },
-    {
-      tab: "Holidays",
-      hint: "",
-      columns: [
-        { name: "Working Hours - Start Time", type: "string" },
-        { name: "1899-12-30T04:38:50.000Z", type: "string" }
-      ]
-    },
-    {
-      tab: "People Gantt",
-      hint: "",
-      columns: [
-        { name: "2026-04-06T18:30:00.000Z", type: "string" },
-        { name: "Workload", type: "string" },
-        { name: "Switch Views", type: "string" },
-        { name: "Teams:", type: "string" },
-        { name: "Proj:", type: "string" },
-        { name: "Stage:", type: "string" },
-        { name: "Client:", type: "string" },
-        { name: "Available", type: "string" },
-        { name: "Overbooked", type: "string" },
-        { name: "Occupied", type: "string" },
-        { name: "Leaves", type: "string" },
-        { name: "Holidays", type: "string" }
-      ]
-    },
-    {
-      tab: "Reports",
-      hint: "",
-      columns: [
-        { name: "Reports", type: "string" },
-        { name: "Link", type: "string" },
-        { name: "Planned vs Actual", type: "string" },
-        { name: "Utilization", type: "string" },
-        { name: "Overall Utilization Summary", type: "string" },
-        { name: "Project wise Utilization", type: "string" },
-        { name: "Utilization as per Calendar", type: "string" },
-        { name: "Overlaps", type: "string" },
-        { name: "Project & Task wise overlaps", type: "string" },
-        { name: "Multiple people on same Task", type: "string" },
-        { name: "Reschedules", type: "string" },
-        { name: "Leaves Summary", type: "string" },
-        { name: "Task Summary", type: "string" },
-        { name: "Who is doing what", type: "string" },
-        { name: "Project Allocations", type: "string" },
-        { name: "Project wise Manhours", type: "string" },
-        { name: "Task wise involvement", type: "string" }
-      ]
-    },
-    {
-      tab: "Sheet50",
-      hint: "",
-      columns: [
-        { name: "Planned days Breakup", type: "string" },
-        { name: "EXCLUDING HOLIDAYS AND WEEKENDS", type: "string" }
-      ]
-    },
-    {
-      tab: "Scoring Matrix",
-      hint: "",
-      columns: [
-        { name: "Rating Variables:", type: "string" },
-        { name: "Task", type: "string" },
-        { name: "Person", type: "string" },
-        { name: "Role", type: "string" },
-        { name: "Project", type: "string" },
-        { name: "Stage of Project", type: "string" }
-      ]
-    },
-    {
-      tab: "Status Updates Log",
-      hint: "",
-      columns: [
-        { name: "Timestamp", type: "string" },
-        { name: "ID", type: "string" },
-        { name: "Status", type: "string" },
-        { name: "Whodonnit", type: "string" }
-      ]
-    }
-  ]
-};
+    };
 // ================================================================
 
 // ── State ─────────────────────────────────────────────────────
